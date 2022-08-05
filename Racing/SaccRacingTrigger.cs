@@ -8,12 +8,15 @@ using VRC.Udon;
 [UdonBehaviourSyncMode(BehaviourSyncMode.NoVariableSync)]
 public class SaccRacingTrigger : UdonSharpBehaviour
 {
+    //Unity assignments
     public string PlaneName;
     [Tooltip("Set automatically on build if left empty")]
     public SaccRaceToggleButton Button;
     public GameObject[] DisabledRaces;
     public GameObject[] InstanceRecordDisallowedRaces;
     public Text TimeText_Cockpit;
+    
+    
     [System.NonSerialized, FieldChangeCallback(nameof(TrackForward))] public bool _TrackForward = true;
     public bool TrackForward
     {
@@ -24,6 +27,8 @@ public class SaccRacingTrigger : UdonSharpBehaviour
         }
         get => _TrackForward;
     }
+
+    //Runtime variables
     private bool CurrentTrackAllowReverse;
     private SaccRaceCourseAndScoreboard CurrentCourse;
     private int CurrentCourseSelection = -1;
@@ -50,28 +55,47 @@ public class SaccRacingTrigger : UdonSharpBehaviour
     private float PlaneDistanceFromCheckPointLastFrame;
     private Vector3 PlaneClosestPosInverseFromPlane;
     private bool Initialized = false;
+
     private void Initialize()
     {
         Initialized = true;
+
+        //Debug.Log($"_TrackForward is {_TrackForward}");
         _TrackForward = true;//Why is this needed?
         GameObject Objs = gameObject;
+        
         //checking if a rigidbody is null in a while loop doesnt work in udon for some reason, use official vrchat workaround
         while (!Utilities.IsValid(PlaneRigidbody) && Objs.transform.parent)
         {
             Objs = Objs.transform.parent.gameObject;
             PlaneRigidbody = Objs.GetComponent<Rigidbody>();
         }
+
         ThisCapsuleCollider = gameObject.GetComponent<CapsuleCollider>();
         ThisObjLayer = 1 << gameObject.layer;
         localPlayer = Networking.LocalPlayer;
-        if (localPlayer == null) { InEditor = true; }
+
+        if (localPlayer == null) 
+        { 
+            InEditor = true; 
+        }
     }
-    public void SendUpdateTimes()
-    { CurrentCourse.SendCustomNetworkEvent(VRC.Udon.Common.Interfaces.NetworkEventTarget.All, "UpdateTimes"); }
+
+    public void SendUpdateTimes() //ToDo: Check 0 references
+    {
+        CurrentCourse.SendCustomNetworkEvent(VRC.Udon.Common.Interfaces.NetworkEventTarget.All, "UpdateTimes");
+    }
+
     public void SetTimerEmpty()
-    { TimeText_Cockpit.text = string.Empty; }
+    { 
+        TimeText_Cockpit.text = string.Empty; 
+    }
+
     void Start()
-    { SetTimerEmpty(); }
+    { 
+        SetTimerEmpty();
+    }
+
     private void Update()
     {
         if (RaceOn)
@@ -80,6 +104,7 @@ public class SaccRacingTrigger : UdonSharpBehaviour
             TimeText_Cockpit.text = RaceTime.ToString();
         }
     }
+
     private void FixedUpdate()
     {
         if (DoSubFrameTimeCheck)
@@ -110,12 +135,17 @@ public class SaccRacingTrigger : UdonSharpBehaviour
             ThisCapsuleCollider.enabled = true;
         }
     }
+
+    
+
     void OnTriggerEnter(Collider other)
     {
         if (CurrentCourseSelection != -1 && (other && other.gameObject == CurrentCourse.RaceCheckpoints[NextCheckpoint]))
         {
             if (NextCheckpoint == FinalCheckpoint)//end of the race
             {
+                
+
                 RaceTime = 0;
                 float subframetime = 0;
                 //get world space position of the point that was closest to the checkpoint the frame before the race was finished
@@ -137,18 +167,24 @@ public class SaccRacingTrigger : UdonSharpBehaviour
                 NextCheckpoint = FirstCheckPoint;
 
                 if (Utilities.IsValid(CurrentCheckPointAnimator))
-                { CurrentCheckPointAnimator.SetBool("Current", false); }
+                { 
+                    CurrentCheckPointAnimator.SetBool("Current", false); 
+                }
+
                 StartCheckPointAnims();
 
-
-
                 CurrentCourse.MyVehicleType = PlaneName;
+
+                bool newRecord = false;
+
                 if (TrackForward || !CurrentTrackAllowReverse)
                 {
                     CurrentCourse.MyTime = RaceTime;
                     CurrentCourse.UpdateMyLastTime();
                     if (RaceTime < CurrentCourse.MyRecordTime)
                     {
+                        newRecord = true;
+
                         CurrentCourse.MyRecordTime = CurrentCourse.MyTime = RaceTime;
                         CurrentCourse.UpdateMyRecord();
 
@@ -170,6 +206,8 @@ public class SaccRacingTrigger : UdonSharpBehaviour
                     CurrentCourse.UpdateMyLastTime();
                     if (RaceTime < CurrentCourse.MyRecordTimeReverse)
                     {
+                        newRecord = true;
+
                         CurrentCourse.MyRecordTimeReverse = CurrentCourse.MyTimeReverse = RaceTime;
                         CurrentCourse.UpdateMyRecord();
 
@@ -186,6 +224,7 @@ public class SaccRacingTrigger : UdonSharpBehaviour
                     }
                 }
 
+                CurrentCourse.RaceFinished(newRecord: newRecord);
 
                 RaceTime = 0;
                 TimeText_Cockpit.text = LastTime.ToString();
@@ -193,6 +232,8 @@ public class SaccRacingTrigger : UdonSharpBehaviour
             }
             else if (NextCheckpoint == FirstCheckPoint)//starting the race
             {
+                CurrentCourse.RaceStarted(activeRacingTrigger: this);
+
                 //subframe accuracy is done on the first and last checkpoint, the code for the last checkpoint(above) is commented
                 RaceTime = 0;
                 float subframetime = 0;
@@ -220,6 +261,8 @@ public class SaccRacingTrigger : UdonSharpBehaviour
             }
             else
             {
+                CurrentCourse.CheckpointPassed();
+
                 //Debug.Log("CheckPoint!");
                 NextCheckpoint += TrackDirection;
                 ProgressCheckPointAnims();
@@ -232,9 +275,11 @@ public class SaccRacingTrigger : UdonSharpBehaviour
             }
         }
     }
+
     public void SetCourse()
     {
         CurrentCourseSelection = Button.CurrentCourseSelection;
+
         if (CurrentCourseSelection != -1)
         {
             DoSubFrameTimeCheck = true;
@@ -259,33 +304,45 @@ public class SaccRacingTrigger : UdonSharpBehaviour
             DoSubFrameTimeCheck = false;
         }
     }
+
     public void SetUpNewRace()
     {
-        if (!Initialized) { Initialize(); }
+        if (!Initialized) 
+        { 
+            Initialize(); 
+        }
+
         RaceOn = false;
         RaceTime = 0;
+
         if (CheckDisallowedRace())
         {
             CurrentCourseSelection = -1;
             return;
         }
+
         SetCourse();
     }
+
     void OnEnable()//Happens when you get in a plane, if a race is enabled
     {
         SetUpNewRace();
         StartCheckPointAnims();
         SetTimerEmpty();
     }
+
     void OnDisable()
     {
         if (CurrentCourse)
         {
+            CurrentCourse.RaceCanceled();
+
             if (Utilities.IsValid(CurrentCheckPointAnimator))
             {
                 CurrentCheckPointAnimator.SetBool("Current", false);
                 CurrentCheckPointAnimator.SetTrigger("Reset");
             }
+
             if (Utilities.IsValid(NextCheckPointAnimator))
             {
                 NextCheckPointAnimator.SetBool("Next", false);
@@ -293,21 +350,27 @@ public class SaccRacingTrigger : UdonSharpBehaviour
             }
         }
     }
+
     void ProgressCheckPointAnims()
     {
         if (Utilities.IsValid(CurrentCheckPointAnimator))
-        { CurrentCheckPointAnimator.SetBool("Current", false); }
+        { 
+            CurrentCheckPointAnimator.SetBool("Current", false); 
+        }
 
         if (Utilities.IsValid(NextCheckPointAnimator))
         {
             NextCheckPointAnimator.SetBool("Next", false);
             NextCheckPointAnimator.SetBool("Current", true);
         }
+
         CurrentCheckPointAnimator = NextCheckPointAnimator;
         int next2 = NextCheckpoint + TrackDirection;
+        
         if (next2 > -1 && next2 < CurrentCourse.RaceCheckpoints.Length)
         {
             NextCheckPointAnimator = CurrentCourse.RaceCheckpoints[NextCheckpoint + TrackDirection].GetComponent<Animator>();
+            
             if (Utilities.IsValid(NextCheckPointAnimator))
             {
                 NextCheckPointAnimator.SetBool("Reverse", !_TrackForward);
@@ -315,9 +378,11 @@ public class SaccRacingTrigger : UdonSharpBehaviour
             }
         }
     }
+
     void StartCheckPointAnims()
     {
-        if (CurrentCourseSelection == -1) { return; }
+        if (CurrentCourseSelection == -1) return;
+
         if (CurrentCourse)
         {
             if (CurrentCourse.RaceCheckpoints.Length > 0)
@@ -340,27 +405,25 @@ public class SaccRacingTrigger : UdonSharpBehaviour
             }
         }
     }
+
     private bool CheckDisallowedRace()
     {
         int ccs = Button.CurrentCourseSelection;
-        if (ccs == -1) { return true; }
+
+        if (ccs == -1) return true;
+
         foreach (GameObject race in DisabledRaces)
         {
-            if (race == Button.Races[ccs].gameObject)
-            {
-                return true;
-            }
+            if (race == Button.Races[ccs].gameObject) return true;
         }
         return false;
     }
+
     private bool CheckRecordDisallowedRace()
     {
         foreach (GameObject race in InstanceRecordDisallowedRaces)
         {
-            if (race == Button.Races[CurrentCourseSelection].gameObject)
-            {
-                return true;
-            }
+            if (race == Button.Races[CurrentCourseSelection].gameObject) return true;
         }
         return false;
     }

@@ -8,14 +8,29 @@ using VRC.Udon;
 [UdonBehaviourSyncMode(BehaviourSyncMode.Manual)]
 public class SaccRaceCourseAndScoreboard : UdonSharpBehaviour
 {
+    //Unity assignments
     [Tooltip("Can be used by other scripts to get the races name.")]
     public string RaceName;
     [Tooltip("All checkpoint objects for this race in order, animations are sent to them as they are passed")]
     public GameObject[] RaceCheckpoints;
     [Tooltip("Parent of all objects related to this race, including scoreboard and checkpoints")]
-    public GameObject RaceObjects;
-    public Text TimeText;
     public bool AllowReverse = true;
+    [SerializeField] UdonBehaviour[] LinkedCustomBehavior;
+
+    //Runtime variables
+    Text TimeText;
+    [HideInInspector] public GameObject LinkedScoreboard;
+
+    //Script sharing
+    [HideInInspector] public SaccRacingTrigger ActiveRacingTrigger;
+
+    public void AttachScoreboard(RaceCanvasController linkedController)
+    {
+        TimeText = linkedController.LinkedTimeText;
+        linkedController.LinkedTitle.text = $"Race\n{RaceName}";
+        LinkedScoreboard = linkedController.gameObject;
+    }
+
     [System.NonSerializedAttribute, UdonSynced(UdonSyncMode.None), FieldChangeCallback(nameof(InstanceRecord))] public string _InstanceRecord = "Instance Record : None";
     public string InstanceRecord
     {
@@ -26,6 +41,7 @@ public class SaccRaceCourseAndScoreboard : UdonSharpBehaviour
         }
         get => _InstanceRecord;
     }
+
     [System.NonSerializedAttribute, UdonSynced(UdonSyncMode.None), FieldChangeCallback(nameof(InstanceRecordReverse))] public string _InstanceRecordReverse = "(R)Instance Record : None";
     public string InstanceRecordReverse
     {
@@ -36,8 +52,12 @@ public class SaccRaceCourseAndScoreboard : UdonSharpBehaviour
         }
         get => _InstanceRecordReverse;
     }
+    
+    //Synced variables
     [System.NonSerializedAttribute][UdonSynced(UdonSyncMode.None)] public float BestTime = Mathf.Infinity;
     [System.NonSerializedAttribute][UdonSynced(UdonSyncMode.None)] public float BestTimeReverse = Mathf.Infinity;
+
+    //Script interactions
     [System.NonSerializedAttribute] public string MyRecord = "My Record : None";
     [System.NonSerializedAttribute] public string MyLastTime = "My Last Time : None";
     [System.NonSerializedAttribute] public string MyName = "No-one";
@@ -48,7 +68,8 @@ public class SaccRaceCourseAndScoreboard : UdonSharpBehaviour
     [System.NonSerializedAttribute] public float MyTime = Mathf.Infinity;
     [System.NonSerializedAttribute] public float MyTimeReverse = Mathf.Infinity;
     [System.NonSerializedAttribute] public string MyVehicleType = "Vehicle";
-    private void Start()
+
+    public void Setup()
     {
         UpdateMyLastTime();
         UpdateMyRecord();
@@ -58,6 +79,51 @@ public class SaccRaceCourseAndScoreboard : UdonSharpBehaviour
         if (Networking.LocalPlayer != null)
         {
             MyName = Networking.LocalPlayer.displayName;
+        }
+    }
+
+    public void RaceStarted(SaccRacingTrigger activeRacingTrigger)
+    {
+        this.ActiveRacingTrigger = activeRacingTrigger;
+
+        foreach (UdonBehaviour behavior in LinkedCustomBehavior)
+        {
+            behavior.SendCustomEvent("RaceStarted");
+        }
+    }
+
+    public void CheckpointPassed()
+    {
+        foreach (UdonBehaviour behavior in LinkedCustomBehavior)
+        {
+            behavior.SendCustomEvent("CheckpointPassed");
+        }
+    }
+
+    public void RaceFinished(bool newRecord)
+    {
+        if (newRecord)
+        {
+            foreach (UdonBehaviour behavior in LinkedCustomBehavior)
+            {
+                behavior.SendCustomEvent("RaceFinishedWithRecord");
+            }
+        }
+        else
+        {
+            foreach (UdonBehaviour behavior in LinkedCustomBehavior)
+            {
+                behavior.SendCustomEvent("RaceFinishedWithoutRecord");
+            }
+        }
+        
+    }
+
+    public void RaceCanceled()
+    {
+        foreach (UdonBehaviour behavior in LinkedCustomBehavior)
+        {
+            behavior.SendCustomEvent("RaceCanceled");
         }
     }
 
@@ -75,6 +141,7 @@ public class SaccRaceCourseAndScoreboard : UdonSharpBehaviour
         }
         UpdateTimes();
     }
+
     public void UpdateMyRecord()
     {
         MyRecord = string.Concat("My Record : ", MyVehicleType, " : ", MyTime);
@@ -88,14 +155,17 @@ public class SaccRaceCourseAndScoreboard : UdonSharpBehaviour
         }
         UpdateTimes();
     }
+
     public void UpdateInstanceRecord()
     {
         InstanceRecord = string.Concat("Instance Record : ", MyName, " : ", MyVehicleType, " : ", BestTime);
     }
+
     public void UpdateInstanceRecordReverse()
     {
         InstanceRecordReverse = string.Concat("(R)Instance Record : ", MyName, " : ", MyVehicleType, " : ", BestTimeReverse);
     }
+
     public void UpdateTimes()
     {
         TimeText.text = string.Concat(InstanceRecord, "\n", MyRecord, "\n", MyLastTime);
@@ -104,6 +174,7 @@ public class SaccRaceCourseAndScoreboard : UdonSharpBehaviour
             TimeText.text = string.Concat(TimeText.text, "\n", InstanceRecordReverse, "\n", MyRecordReverse, "\n", MyLastTimeReverse);
         }
     }
+
     public override void OnPlayerJoined(VRCPlayerApi player)
     {
         RequestSerialization();

@@ -491,7 +491,7 @@ namespace SaccFlightAndVehicles
         public bool printWheelRotSpeed;
         private void RotateWheelOwner()
         {
-            if (printWheelRotSpeed) Debug.Log(WheelRotationSpeedRPS);
+            if (printWheelRotSpeed) Debug.Log($"WheelRotationSpeedRPS = {WheelRotationSpeedRPS}");
             WheelRotation += WheelRotationSpeedRPS * 360f * Time.deltaTime;
             Quaternion newrot = Quaternion.AngleAxis(WheelRotation, Vector3.right);
             WheelVisual.localRotation = newrot;
