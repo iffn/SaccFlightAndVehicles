@@ -43,12 +43,14 @@ namespace SaccFlightAndVehicles
         public float ThrottleStrength = 20f;
         [Tooltip("Multiply how much the VR throttle moves relative to hand movement")]
         public float ThrottleSensitivity = 6f;
+        [Tooltip("How long it takes to raech max throttle while holding the key on desktop")]
+        public float ThrottleSpeedDesktop = .5f;
         [Tooltip("How many degrees to turn the wheel until it reaches max turning, in each direction, animation should match this")]
         public float SteeringWheelDegrees = 360f;
         [Tooltip("How far down you have to push the grip button to grab the joystick and throttle")]
         public float GripSensitivity = .75f;
         [Tooltip("How long keyboard turning must be held down to reach full deflection")]
-        public float SteeringKeyboardSecsToMax = 1.5f;
+        public float KeyboardSteeringSpeed = 1.5f;
         [Tooltip("how fast steering wheel returns to neutral position 1 = 1 second, .2 = 5 seconds")]
         public float SteeringReturnSpeed = 1f;
         [Tooltip("how fast steering wheel returns to neutral position in VR 1 = 1 second, .2 = 5 seconds")]
@@ -199,6 +201,7 @@ namespace SaccFlightAndVehicles
         private float TempThrottle;
         [System.NonSerializedAttribute] public float ThrottleInput = 0f;
         private float yaw = 0f;
+        [System.NonSerializedAttribute] public bool Asleep;
         private bool Initialized;
         [System.NonSerializedAttribute] public float FullHealth;
         [System.NonSerializedAttribute] public bool Taxiing = false;
@@ -543,23 +546,17 @@ namespace SaccFlightAndVehicles
                 if (Taxiing && !GroundedLastFrame && !FloatingLastFrame)
                 {
                     SendCustomNetworkEvent(VRC.Udon.Common.Interfaces.NetworkEventTarget.All, nameof(TakeOff));
+                    VehicleRigidbody.WakeUp();
                 }
 
                 //synced variables because rigidbody values aren't accessable by non-owner players
                 CurrentVel = VehicleRigidbody.velocity;
                 Speed = CurrentVel.magnitude;
-                bool VehicleMoving = false;
-                if (Speed > .1f)//don't bother doing all this for vehicles that arent moving and it therefore wont even effect
-                {
-                    VehicleMoving = true;//check this bool later for more optimizations
-                    WindAndAoA();
-                }
-
+                bool VehicleMoving;
                 if (Piloting)
                 {
-                    //gotta do these this if we're piloting but it didn't get done(specifically, hovering extremely slowly in a VTOL craft will cause control issues we don't)
-                    if (!VehicleMoving)
-                    { WindAndAoA(); VehicleMoving = true; }
+                    VehicleMoving = true;
+                    WindAndAoA();
                     DoRepeatingWorld();
 
                     if (!_DisablePhysicsAndInputs)
@@ -728,12 +725,12 @@ namespace SaccFlightAndVehicles
                                 if (HasAfterburner)
                                 {
                                     if (AfterburnerOn)
-                                    { PlayerThrottle = Mathf.Clamp(PlayerThrottle + ((AccelKeyi - DecelKeyi) * .5f * DeltaTime), 0, 1f); }
+                                    { PlayerThrottle = Mathf.Clamp(PlayerThrottle + ((AccelKeyi - DecelKeyi) * ThrottleSpeedDesktop * DeltaTime), 0, 1f); }
                                     else
-                                    { PlayerThrottle = Mathf.Clamp(PlayerThrottle + ((AccelKeyi - DecelKeyi) * .5f * DeltaTime), 0, ThrottleAfterburnerPoint); }
+                                    { PlayerThrottle = Mathf.Clamp(PlayerThrottle + ((AccelKeyi - DecelKeyi) * ThrottleSpeedDesktop * DeltaTime), 0, ThrottleAfterburnerPoint); }
                                 }
                                 else
-                                { PlayerThrottle = Mathf.Clamp(PlayerThrottle + ((AccelKeyi - DecelKeyi) * .5f * DeltaTime), 0, 1f); }
+                                { PlayerThrottle = Mathf.Clamp(PlayerThrottle + ((AccelKeyi - DecelKeyi) * ThrottleSpeedDesktop * DeltaTime), 0, 1f); }
 
                                 if (ThrottleGrip > GripSensitivity)
                                 {
@@ -852,7 +849,7 @@ namespace SaccFlightAndVehicles
                             /*                         RotationInputs.x = Mathf.Clamp(VRPitchRoll.y + Wi + Si + downi + upi, -1, 1) * Limits;
                                                     RotationInputs.y = Mathf.Clamp(Qi + Ei + JoystickPosYaw.x, -1, 1) * Limits; */
                             //roll isn't subject to flight limits
-                            float YawAddAmount = VRJoystickPos + (-(float)(Ai + Di + lefti + righti) * DeltaTime * SteeringKeyboardSecsToMax);
+                            float YawAddAmount = VRJoystickPos + (-(float)(Ai + Di + lefti + righti) * DeltaTime * KeyboardSteeringSpeed);
                             if (InVR)
                             {
                                 if (Mathf.Abs(YawAddAmount) > 0)
@@ -892,6 +889,17 @@ namespace SaccFlightAndVehicles
                 }
                 else
                 {
+                    if (Speed > .01f)
+                    {
+                        VehicleMoving = true;//check this bool later for more optimizations
+                        WindAndAoA();
+                    }
+                    else if (!Asleep && GroundedLastFrame)
+                    {
+                        FallAsleep();
+                        VehicleMoving = false;
+                    }
+                    else { VehicleMoving = false; }
                     if (Taxiing)
                     {
                         StillWindMulti = Mathf.Min(Speed * .1f, 1);
@@ -956,7 +964,7 @@ namespace SaccFlightAndVehicles
         }
         private void FixedUpdate()
         {
-            if (IsOwner)
+            if (IsOwner && !Asleep)
             {
                 float DeltaTime = Time.fixedDeltaTime;
                 //lerp velocity toward 0 to simulate air friction
@@ -1074,6 +1082,21 @@ namespace SaccFlightAndVehicles
                 VehicleObjectSync.Respawn();
             }
             EntityControl.SendEventToExtensions("SFEXT_O_MoveToSpawn");
+        }
+        private void WakeUp()
+        {
+            Asleep = false;
+            EntityControl.SendEventToExtensions("SFEXT_L_WakeUp");
+        }
+        private void FallAsleep()
+        {
+            Asleep = true;
+            EntityControl.SendEventToExtensions("SFEXT_L_FallAsleep");
+            VehicleRigidbody.Sleep();
+            AllGs = 0;
+            GDamageToTake = 0;
+            VertGs = 0;
+            LastFrameVel = Vector3.zero;
         }
         public void SFEXT_L_CoMSet()
         {
@@ -1398,6 +1421,7 @@ namespace SaccFlightAndVehicles
         public void SFEXT_L_OnCollisionEnter()
         {
             if (!IsOwner) { return; }
+            if (Asleep) { WakeUp(); }
             LastCollisionTime = Time.time;
             if (Time.time - LastCollisionTime < MinCollisionSoundDelay)
             {
@@ -1454,6 +1478,7 @@ namespace SaccFlightAndVehicles
         public void SFEXT_O_TakeOwnership()
         {
             IsOwner = true;
+            if (Asleep) { WakeUp(); }
             VehicleRigidbody.velocity = CurrentVel;
             if (_EngineOn)
             { PlayerThrottle = ThrottleInput = EngineOutputLastFrame = EngineOutput; }
@@ -1476,11 +1501,10 @@ namespace SaccFlightAndVehicles
         }
         public void SFEXT_O_PilotEnter()
         {
-            //setting this as a workaround because it doesnt work reliably in Start()
+            if (Asleep) { WakeUp(); }
             if (!InEditor)
             {
-                InVR = localPlayer.IsUserInVR();//move me to start when they fix the bug
-                                                //https://feedback.vrchat.com/vrchat-udon-closed-alpha-bugs/p/vrcplayerapiisuserinvr-for-the-local-player-is-not-returned-correctly-when-calle
+                InVR = localPlayer.IsUserInVR();
             }
             GDHitRigidbody = null;
             if (_EngineOn)
