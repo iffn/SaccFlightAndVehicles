@@ -26,7 +26,7 @@ public class SaccAirVehicleEditor : Editor
             checkFoldout = new CheckFoldout(true, LinkedSaccAirVehicle);
         checkFoldout.DrawAsFoldout();
         
-        if(performanceFoldout != null)
+        if(performanceFoldout == null)
             performanceFoldout = new PerformanceFoldout(false, LinkedSaccAirVehicle);
         performanceFoldout.DrawAsFoldout();
 
